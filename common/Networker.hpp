@@ -38,6 +38,10 @@
 #include "Log.hpp"
 #include "Server.hpp"
 #include "Client.hpp"
+#include "Timer.hpp"
+
+#define DEFAULT_BUFLEN 8192
+#define DEFAULT_PORT 27015
 
 namespace Network
 {
@@ -79,23 +83,50 @@ public:
     };
 
     int
-    runServer(SocketHandlerSimple&& cb) {
-        auto res = handleClient(std::move(cb));
+    runServer(SocketCallback&& recvcb) {
+        server_.setRecvCb(recvcb);
+        auto res = serverRecvHandlerAsync();
         res.get();
         return server_.closeclientSocket();
     };
 
+    void
+    setRecvCb(SocketCallback& recvcb) {
+        server_.setRecvCb(recvcb);
+    };
+
     std::future<void>
-    handleClient(SocketHandlerSimple&& cb) {
-        return std::async([this, &cb]() {
+    serverRecvHandlerAsync() {
+        return std::async([this]() {
             SOCKET ClientSocket = server_.acceptClient();
-            cb(ClientSocket);
+            DBGOUT("rx - recvHandler - start...");
+            int     recvResult = 1;
+            char    recvbuf[DEFAULT_BUFLEN];
+            int     recvbuflen = DEFAULT_BUFLEN;
+
+            while (recvResult > 0) {
+                DBGOUT("rx - waiting on socket...");
+                recvResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
+                if (recvResult > 0) {
+                    server_.getRecvCb()(ClientSocket, recvbuf, recvResult);
+                }
+                else if (recvResult == 0) {
+                    DBGOUT("rx - connection closed by client...");
+                    break;
+                }
+                else {
+                    DBGOUT("rx - recv failed with error: %d", WSAGetLastError());
+                    break;
+                }
+            };
+            DBGOUT("rx - recvHandler - done");
         });
     };
 
     void
     closeServer() {
         if (server_.isRunning()) {
+            clientRecvTask_._Abandon();
             DBGOUT("closing server...");
             server_.stopListening();
         }
@@ -110,7 +141,38 @@ public:
     int
     startClient(const std::string& host,
                 PortNumber port) {
-        return client_.connectToHost(host, port);
+        int res = client_.connectToHost(host, port);
+        if (res == 0)
+            clientRecvTask_ = clientRecvHandlerAsync();
+        return res;
+    };
+
+    std::future<void>
+    clientRecvHandlerAsync() {
+        return std::async([this]() {
+            DBGOUT("rx - recvHandler - start...");
+            SOCKET Socket = client_.getSocket();
+            int     recvResult = 1;
+            char    recvbuf[DEFAULT_BUFLEN];
+            int     recvbuflen = DEFAULT_BUFLEN;
+
+            while (recvResult > 0 && client_.isConnected()) {
+                DBGOUT("rx - waiting on socket...");
+                recvResult = recv(Socket, recvbuf, recvbuflen, 0);
+                if (recvResult > 0) {
+                    client_.getRecvCb()(Socket, recvbuf, recvResult);
+                }
+                else if (recvResult == 0) {
+                    DBGOUT("rx - connection closed by client...");
+                    break;
+                }
+                else {
+                    DBGOUT("rx - recv failed with error: %d", WSAGetLastError());
+                    break;
+                }
+            };
+            DBGOUT("rx - recvHandler - done");
+        });
     };
 
     void
@@ -119,12 +181,13 @@ public:
     };
 
     int
-    startStreaming( SocketHandler&& rxcb,
-                    SocketHandler&& txcb) {
-        auto rx = client_.setRecvHandler(rxcb);
-        auto tx = client_.setSendHandler(txcb);
-        tx.get();
+    startStreaming( SocketCallback&& recvcb,
+                    SocketHandler&& writer) {
+        client_.setRecvCb(recvcb);
+        auto txHandler = client_.setSendHandler(writer);
+        txHandler.get();
         auto res = client_.disconnect();
+        clientRecvTask_._Abandon();
         if (res == SOCKET_ERROR) {
             DBGOUT("startStreaming - disconnect failed with error: %d", WSAGetLastError());
             return 1;
@@ -134,6 +197,8 @@ public:
 
 private:
     WSADATA wsaData_;
+
+    std::future<void> clientRecvTask_;
 
     Server server_;
     Client client_;

@@ -22,52 +22,30 @@
 
 using namespace Network;
 
-#define DEFAULT_BUFLEN 8192
-#define DEFAULT_PORT 27015
-
-int
-clientCallBack(SOCKET ClientSocket)
+void
+recvCb(SOCKET& ClientSocket, const char* recvbuf, int recvResult)
 {
-    DBGOUT("rxcb - start...");
-    int     recvResult = 1;
-    char    recvbuf[DEFAULT_BUFLEN];
-    int     recvbuflen = DEFAULT_BUFLEN;
-    
-    while (recvResult > 0) {
-        recvResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
-        if (recvResult > 0) {
-            DBGOUT("rxcb - bytes received: %d", recvResult);
-            DBGOUT("rxcb - bytes : %s", recvbuf);
+    DBGOUT("rxcb - bytes received: %d", recvResult);
+    DBGOUT("rxcb - bytes : %s", recvbuf);
 
-            auto sendResult = send(ClientSocket, recvbuf, recvResult, 0);
-            if (sendResult == SOCKET_ERROR) {
-                DBGOUT("rxcb - send failed with error: %d", WSAGetLastError());
-                return 1;
-            }
-            DBGOUT("rxcb - bytes sent: %d", sendResult);
-        }
-        else if (recvResult == 0) {
-            DBGOUT("rxcb - connection closed by client...");
-        }
-        else {
-            DBGOUT("rxcb - recv failed with error: %d", WSAGetLastError());
-            return 1;
-        }
-    };
-    return 1;
+    auto sendResult = send(ClientSocket, recvbuf, recvResult, 0);
+    if (sendResult == SOCKET_ERROR) {
+        DBGOUT("rxcb - send failed with error: %d", WSAGetLastError());
+    }
+    DBGOUT("rxcb - bytes sent: %d", sendResult);
 }
 
 int
 run()
 {
     int res;
-    Networker networker;
+    Networker nw;
 
-    if (res = networker.startServer(DEFAULT_PORT) != 0)
+    if (res = nw.startServer(DEFAULT_PORT) != 0)
         return res;
 
     do {
-        res = networker.runServer(&clientCallBack) != 0;
+        res = nw.runServer(&recvCb) != 0;
     } while (res == 0);
 
     return res;

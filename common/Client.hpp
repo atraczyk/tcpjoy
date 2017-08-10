@@ -42,7 +42,28 @@ namespace Network
 
 using PortNumber = uint16_t;
 using SocketHandler = std::function<void(SOCKET,std::atomic<bool>&)>;
-using SocketHandlerSimple = std::function<void(SOCKET)>;
+using SocketCallback = std::function<void(SOCKET&, const char*, int)>;
+
+int
+writeToSocket(SOCKET socket, const std::string& data) {
+    const char *sendbuf = data.c_str();
+    auto res = send(socket, sendbuf, (int)strlen(sendbuf), 0);
+    if (res == SOCKET_ERROR) {
+        DBGOUT("send failed with error: %d", WSAGetLastError());
+        return res;
+    }
+    return res;
+};
+
+//int
+//writeToSocket(SOCKET socket, const char* data) {
+//    auto res = send(socket, data, (int)strlen(data), 0);
+//    if (res == SOCKET_ERROR) {
+//        DBGOUT("send failed with error: %d", WSAGetLastError());
+//        return res;
+//    }
+//    return res;
+//};
 
 class Client {
 public:
@@ -58,7 +79,7 @@ public:
         if (port)
             portNumber_ = port;
 
-        int res = 0;
+        unsigned res = 0;
 
         addrinfo *addressResult = nullptr;
         addrinfo *addressAttempt = nullptr;
@@ -116,18 +137,6 @@ public:
     int
     disconnect() {
         DBGOUT("closing connected socket...");
-        transmitting_ = false;
-        receiving_ = false;
-        recvFuture_.get();
-        sendFuture_.get();
-        /*{
-            SocketHandler empty;
-            std::swap(recvHandler_, empty);
-        }
-        {
-            SocketHandler empty;
-            std::swap(sendHandler_, empty);
-        }*/
         auto res = shutdown(connectSocket_, SD_SEND);
         if (res == SOCKET_ERROR) {
             DBGOUT("shutdown failed with error: %ld", WSAGetLastError());
@@ -140,15 +149,12 @@ public:
 
     int
     write(const std::string& data) {
-        const char *sendbuf = data.c_str();
-        auto res = send(connectSocket_, sendbuf, (int)strlen(sendbuf), 0);
+        auto res = writeToSocket(connectSocket_, data);
         if (res == SOCKET_ERROR) {
-            DBGOUT("send failed with error: %d", WSAGetLastError());
-            closeConnectedSocket();
-            return 1;
+            DBGOUT("write failed with error: %d", WSAGetLastError());
+            return res;
         }
-
-        DBGOUT("Bytes Sent: %ld", res);
+        return res;
     };
 
     int
@@ -168,17 +174,6 @@ public:
     };
 
     std::shared_future<void>
-    setRecvHandler(SocketHandler& cb) {
-        recvHandler_ = cb;
-        DBGOUT("setRecvHandler...");
-        recvFuture_ = std::async([this, cb]() {
-            cb(connectSocket_, receiving_);
-        });
-        receiving_ = true;
-        return recvFuture_;
-    };
-
-    std::shared_future<void>
     setSendHandler(SocketHandler& cb) {
         sendHandler_ = cb;
         DBGOUT("setSendHandler...");
@@ -189,7 +184,7 @@ public:
         return sendFuture_;
     };
 
-    bool
+    SOCKET
     getSocket() {
         return connectSocket_;
     };
@@ -199,21 +194,29 @@ public:
         return connected_.load();
     };
 
+    SocketCallback&
+        getRecvCb() {
+        return recvCb_;
+    };
+
+    void
+    setRecvCb(SocketCallback& cb) {
+        recvCb_ = std::move(cb);
+    };
+
 private:
     std::string host_;
     PortNumber portNumber_;
-
     SOCKET connectSocket_;
-
     std::atomic_bool connected_;
-    std::atomic_bool transmitting_;
+
     std::atomic_bool receiving_;
+    SocketCallback recvCb_;
 
-    SocketHandler recvHandler_;
+    std::atomic_bool transmitting_;
     SocketHandler sendHandler_;
-
-    std::shared_future<void> recvFuture_;
     std::shared_future<void> sendFuture_;
+
 };
 
 }

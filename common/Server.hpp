@@ -169,14 +169,23 @@ public:
         return connected_.load();
     };
 
+    SocketCallback&
+    getRecvCb() {
+        return recvCb_;
+    };
+
+    void
+    setRecvCb(SocketCallback& cb) {
+        recvCb_ = std::move(cb);
+    };
+
 private:
     PortNumber portNumber_;
 
-    sockaddr_in serverAddress_;
-    sockaddr_in clientAddress_;
-
     SOCKET listenSocket_;
     SOCKET clientSocket_;
+
+    SocketCallback recvCb_;
     
     std::atomic_bool running_;
     std::atomic_bool connected_;

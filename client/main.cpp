@@ -15,300 +15,158 @@
 *  along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#define WINDOW_SUBSYSTEM
-
 #include "Log.hpp"
 #include "Networker.hpp"
 #include "Timer.hpp"
-#include "Input.hpp"
+
+#include "SDL.h"
 
 #include <cstdlib>
 #include <io.h>
 #include <fcntl.h>
 #include <ios>
 
-#pragma comment (lib, "hid.lib")
-
-#define DEFAULT_BUFLEN 8192
-#define DEFAULT_PORT 27015
-
-using namespace Input;
-
-InputGroup  input;
-HINSTANCE   hInstance;
-HWND        hWnd;
-
-static const WORD MAX_CONSOLE_LINES = 500;
+SDL_GameController *controller = NULL;
+const int JOYSTICK_DEAD_ZONE = 4000;
+SDL_Event e;
+int16_t lx, ly, ba, bb;
 
 int
-recvHandler(SOCKET Socket, std::atomic<bool>& running)
+initializeSDL()
 {
-    DBGOUT("rxcb - recvHandler - start...");
-    int     recvResult = 1;
-    char    recvbuf[DEFAULT_BUFLEN];
-    int     recvbuflen = DEFAULT_BUFLEN;
+    if (SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) < 0) {
+        DBGOUT("SDL could not initialize! SDL Error: %s", SDL_GetError());
+        return 1;
+    }
+    return 0;
+}
 
-    timer streamTimer([&]() {
-        recvResult = recv(Socket, recvbuf, recvbuflen, 0);
-        if (recvResult > 0) {
-            DBGOUT("rxcb - bytes received: %d", recvResult);
-            DBGOUT("rxcb - bytes : %s", recvbuf);
-        }
-        else if (recvResult == 0) {
-            DBGOUT("rxcb - connection closed by server...");
-        }
-        else {
-            DBGOUT("rxcb - recv failed with error: %d", WSAGetLastError());
-            return 1;
-        }
-    }, [&recvResult, &running]() {
-        return (recvResult > 0 && running.load());
-    }, 0.0, -1);
+int
+getController()
+{
+    SDL_GameController *ctrl = NULL;
 
-    DBGOUT("rxcb - recvHandler - done");
+    auto njoysticks = SDL_NumJoysticks();
+    DBGOUT("getControllers: %d found", njoysticks);
+    for (int i = 0; i < njoysticks; ++i) {
+        if (SDL_IsGameController(i)) {
+            controller = SDL_GameControllerOpen(i);
+            if (controller) {
+                DBGOUT("Opened gamecontroller %i", i);
+                return 0;
+            }
+            else {
+                DBGOUT("Could not open gamecontroller %i: %s", i, SDL_GetError());
+                return 1;
+            }
+        }
+    }
     return 1;
+}
+
+void
+getJoyState()
+{
+    //pollJoystick();
+    SDL_PollEvent(&e);
+
+    lx = SDL_GameControllerGetAxis(controller,
+        SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_LEFTX);
+    ly = SDL_GameControllerGetAxis(controller,
+        SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_LEFTY);
+    ba = SDL_GameControllerGetButton(controller,
+        SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_A);
+    bb = SDL_GameControllerGetButton(controller,
+        SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_B);
+
+    if (std::abs(lx) < JOYSTICK_DEAD_ZONE) lx = 0;
+    if (std::abs(ly) < JOYSTICK_DEAD_ZONE) ly = 0;
+
+    DBGOUT("lx: %d", lx);
+    DBGOUT("ly: %d", ly);
+    DBGOUT("ba: %d", ba);
+    DBGOUT("bb: %d", bb);
+}
+
+void
+recvCb(SOCKET& ClientSocket, const char* recvbuf, int recvResult)
+{
+    DBGOUT("rxcb - bytes received: %d", recvResult);
+    DBGOUT("rxcb - bytes : %s", recvbuf);
 }
 
 int
 sendHandler(SOCKET Socket, std::atomic<bool>& running)
 {
-    DBGOUT("txcb - sendHandler - start...");
+    DBGOUT("txh - sendHandler - start...");
     
     int sendResult = 1;
     
     char sendbuf[DEFAULT_BUFLEN];
-    std::string data = "'{'joystate': {'joyt1x': '-0.647','joyt1y': '0.214'}}'";
-    data.copy(sendbuf, DEFAULT_BUFLEN);
-
-    timer streamTimer([Socket, &running, &sendResult, sendbuf]() {
-        sendResult = send(Socket, sendbuf, (int)strlen(sendbuf), 0);
+    
+    timer writer([Socket, &running, &sendResult, &sendbuf]() {
+        getJoyState();
+        sprintf_s(sendbuf,
+            "'{'j0':{'lx':'%d','ly':'%d','b0':'%d','b1':'%d'}}'",
+            lx, ly, ba, bb);
+        std::string data(sendbuf);
+        if(!data.empty())
+            sendResult = writeToSocket(Socket, data);
         if (sendResult == SOCKET_ERROR) {
-            DBGOUT("txcb - send failed with error: %d", WSAGetLastError());
+            DBGOUT("txh - send failed with error: %d", WSAGetLastError());
             running = false;
         }
         else if (sendResult == 0) {
-            DBGOUT("txcb - connection closed by server...");
+            DBGOUT("txh - connection closed by server...");
         }
         else {
-            DBGOUT("rxcb - bytes sent: %d", sendResult);
+            //DBGOUT("txh - bytes sent: %d", sendResult);
         }
     }, [&sendResult, &running]() {
         return (sendResult > 0 && running.load());
-    }, 0.016, -1);
+    }, 0.05, -1);
 
-    DBGOUT("txcb - sendHandler - done");
+    DBGOUT("txh - sendHandler - done");
     return 1;
 }
+
+#define MAXTRIES 5
+#define TRY_OR_DIE(x)   if (res = x != 0) {             \
+                            if (tries < MAXTRIES - 1) { \
+                                ++tries;                \
+                                continue;               \
+                            }                           \
+                            return res;                 \
+                        }
 
 int
 run()
 {
     int res;
-    Networker networker;
+    Networker nw;
+    int tries;
 
     do {
-        if (res = networker.startClient("localhost", DEFAULT_PORT) != 0)
-            return res;
-
-        if (res = networker.startStreaming(&recvHandler, &sendHandler) != 0)
-            return res;
+        tries = 0;
+        TRY_OR_DIE(nw.startClient("localhost", DEFAULT_PORT));
+        TRY_OR_DIE(nw.startStreaming(&recvCb, &sendHandler));
     } while (true);
 
     return 0;
 }
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+#undef main
+int __cdecl
+ main(int argc, char **argv)
 {
-    switch (message)
-    {
+    initializeSDL();
+    getController();
 
-    case WM_CREATE:
-    {
-        DBGOUT("RAWINPUTDEVICE enumeration...");
-        RAWINPUTDEVICE rid;
+    int ret = run();
 
-        rid.usUsagePage = 0x01;
-        rid.usUsage = 0x05;
-        rid.dwFlags = 0x00;
-        rid.hwndTarget = hWnd;
+    system("pause");
 
-        if (!RegisterRawInputDevices(&rid, 1, sizeof(RAWINPUTDEVICE)))
-            return -1;
-    }
-    return 0;
+    SDL_Quit();
 
-    case WM_INPUT:
-    {
-        PRAWINPUT pRawInput;
-        UINT      bufferSize;
-        HANDLE    hHeap;
-
-        GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &bufferSize, sizeof(RAWINPUTHEADER));
-
-        hHeap = GetProcessHeap();
-        pRawInput = (PRAWINPUT)HeapAlloc(hHeap, 0, bufferSize);
-        if (!pRawInput)
-            return 0;
-
-        GetRawInputData((HRAWINPUT)lParam, RID_INPUT, pRawInput, &bufferSize, sizeof(RAWINPUTHEADER));
-
-        if (pRawInput->header.dwType == RIM_TYPEHID)
-        {
-            ReadGamePadInput(pRawInput, input.gamepad);
-        }
-
-        HeapFree(hHeap, 0, pRawInput);
-    }
-    return 0;
-
-    case WM_MOUSEMOVE:
-        DBGOUT("WM_MOUSEMOVE...");
-        POINTS point;
-        point = MAKEPOINTS(lParam);
-        input.mouse.lX = point.x;
-        input.mouse.lY = point.y;
-        return 0;
-
-    case WM_LBUTTONDOWN:
-        return 0;
-
-    case WM_LBUTTONUP:
-        return 0;
-
-    case WM_RBUTTONDOWN:
-        return 0;
-
-    case WM_CLOSE:
-        PostQuitMessage(0);
-        return 0;
-
-    case WM_DESTROY:
-        return 0;
-
-    case WM_KEYDOWN:
-        input.keyboard.bKeys[(unsigned char)wParam] = true;
-        return 0;
-
-    case WM_KEYUP:
-        input.keyboard.bKeys[(unsigned char)wParam] = false;
-        return 0;
-
-        return DefWindowProc(hWnd, message, wParam, lParam);
-
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
-
-    }
-}
-
-BOOL createWindow(char* title, WNDPROC WndProc)
-{
-    WNDCLASS    wc;
-    DWORD       dwExStyle;
-    DWORD       dwStyle;
-    RECT        WindowRect;
-
-    hInstance = GetModuleHandle(NULL);
-    wc.style = CS_OWNDC;
-    wc.lpfnWndProc = (WNDPROC)WndProc;
-    wc.cbClsExtra = 0;
-    wc.cbWndExtra = 0;
-    wc.hInstance = hInstance;
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = NULL;
-    wc.lpszMenuName = NULL;
-
-    RegisterClass(&wc);
-
-    dwExStyle = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-    dwStyle = WS_OVERLAPPED | WS_MINIMIZEBOX | WS_CAPTION | WS_SYSMENU;
-
-    AdjustWindowRectEx(&WindowRect, dwStyle, false, dwExStyle);
-
-    hWnd = CreateWindowEx(dwExStyle,
-        __TEXT("tcpjoy"),
-        title,
-        dwStyle |
-        WS_CLIPSIBLINGS |
-        WS_CLIPCHILDREN,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        hInstance,
-        NULL);
-
-    RECT rcClient, rcWind;
-    GetClientRect(hWnd, &rcClient);
-    GetWindowRect(hWnd, &rcWind);
-    SetForegroundWindow(hWnd);
-    SetFocus(hWnd);
-    return true;
-}
-
-//int __cdecl main(int argc, char **argv)
-//{
-//    if (!createWindow("tcpjoyclient", WndProc))
-//        return 0;
-//
-//    int ret = run();
-//
-//    system("pause");
-//
-//    return ret;
-//}
-
-void destroyWindow()
-{
-    if (hWnd) {
-        DestroyWindow(hWnd);
-        hWnd = NULL;
-    }
-
-    UnregisterClass(__TEXT("tcpjoy"), hInstance);
-    hInstance = NULL;
-}
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-    LPSTR lpCmdLine, int iCmdShow)
-{
-    AllocConsole();
-
-    freopen("CONIN$", "r", stdin);
-    freopen("CONOUT$", "w", stdout);
-    freopen("CONOUT$", "w", stderr);
-
-    std::ios::sync_with_stdio();
-
-    MSG msg;
-    BOOL quit = FALSE;
-
-    createWindow("tcpjoy", WndProc);
-
-    auto worker = std::async([]() { run(); });
-    auto ui = std::async([&]() {
-        while (!quit) {
-            if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-                if (msg.message == WM_QUIT) {
-                    quit = TRUE;
-                }
-                else {
-                    TranslateMessage(&msg);
-                    DispatchMessage(&msg);
-                }
-            }
-            else {
-            }
-        };
-    });
-    
-    worker.get();
-    ui.get();
-
-    FreeConsole();
-    destroyWindow();
-    return msg.wParam;
+    return ret;
 }
