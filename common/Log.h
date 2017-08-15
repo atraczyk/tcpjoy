@@ -27,7 +27,7 @@
 
 #undef min
 
-std::mutex logMutex;
+static std::mutex logMutex;
 
 void
 printLog(std::ostream& s, char const *m, std::array<char, 8192>& buf, int len) {
@@ -42,14 +42,10 @@ printLog(std::ostream& s, char const *m, std::array<char, 8192>& buf, int len) {
         << std::setfill('0') << std::setw(6) << num % den << "]" << " ";
 
     // write log
-#ifndef WINDOW_SUBSYSTEM
     s.write(buf.data(), std::min((size_t)len, buf.size()));
     if ((size_t)len >= buf.size())
         s << "[[TRUNCATED]]";
         s << std::endl;
-#else
-    printf("%s\n", buf.data());
-#endif
 }
 
 void
@@ -67,5 +63,10 @@ consoleLog(char const *m, ...) {
 }
 
 #ifndef DBGOUT
-#define DBGOUT(m, ...) consoleLog(m, __VA_ARGS__);
+#ifndef _WIN32
+//#define DBGOUT(m, ...)
+#define DBGOUT(format, …) fprintf (stdout, format, __VA_ARGS__)
+#else
+#define DBGOUT(m, ...) consoleLog(m, __VA_ARGS__)
+#endif
 #endif

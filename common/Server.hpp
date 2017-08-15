@@ -21,21 +21,11 @@
 #include <string>
 #include <future>
 
-#ifdef _WIN32
-#undef UNICODE
-
-#define WIN32_LEAN_AND_MEAN
-
-#include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <stdlib.h>
-#include <stdio.h>
-
-#pragma comment (lib, "Ws2_32.lib")
+#ifndef _WIN32
+#define ZeroMemory(Destination,Length) memset((Destination),0,(Length))
 #endif
 
-#include "Log.hpp"
+#include "Log.h"
 #include "Client.hpp"
 
 using namespace Network;
@@ -50,19 +40,18 @@ public:
         , listenSocket_(INVALID_SOCKET)
         , clientSocket_(INVALID_SOCKET)
         , connected_(false)
-        , running_(false)
-    {};
+        , running_(false) { };
     ~Server() {
         if (isRunning())
             stopListening();
     };
 
-    SOCKET
+    Socket
     acceptClient() {
         DBGOUT("waiting for client...");
         clientSocket_ = accept(listenSocket_, NULL, NULL);
         if (clientSocket_ == INVALID_SOCKET) {
-            DBGOUT("accept failed with error: %ld", WSAGetLastError());
+            DBGOUT("accept failed with error: %ld", _socketError());
             closeclientSocket();
         }
         DBGOUT("client connected");
@@ -101,7 +90,7 @@ public:
                                 addressResult->ai_socktype,
                                 addressResult->ai_protocol);
         if (listenSocket_ == INVALID_SOCKET) {
-            DBGOUT("socket failed with error: %ld", WSAGetLastError());
+            DBGOUT("socket failed with error: %ld", _socketError());
             freeaddrinfo(addressResult);
             return 1;
         }
@@ -110,9 +99,9 @@ public:
                     addressResult->ai_addr,
                     (int)addressResult->ai_addrlen);
         if (res == SOCKET_ERROR) {
-            DBGOUT("bind failed with error: %ld", WSAGetLastError());
+            DBGOUT("bind failed with error: %ld", _socketError());
             freeaddrinfo(addressResult);
-            closesocket(listenSocket_);
+            _close(listenSocket_);
             return 1;
         }
 
@@ -120,8 +109,8 @@ public:
 
         res = listen(listenSocket_, SOMAXCONN);
         if (res == SOCKET_ERROR) {
-            DBGOUT("listen failed with error: %ld", WSAGetLastError());
-            closesocket(listenSocket_);
+            DBGOUT("listen failed with error: %ld", _socketError());
+            _close(listenSocket_);
             return 1;
         }
 
@@ -132,15 +121,18 @@ public:
 
     int
     closeclientSocket() {
-        if (isRunning() && isConnected()) {
-            DBGOUT("shutting down client socket...");
+        if (isConnected()) {
+            DBGOUT("shutting down connected socket...");
             connected_ = false;
+#ifdef _WIN32
             int res = shutdown(clientSocket_, SD_SEND);
             if (res == SOCKET_ERROR) {
-                DBGOUT("shutdown failed with error: %ld", WSAGetLastError());
-                closesocket(clientSocket_);
+                DBGOUT("shutdown failed with error: %ld", _socketError());
+                _close(clientSocket_);
                 return 1;
             }
+#endif
+            _close(clientSocket_);
             return 0;
         }
         return 1;
@@ -153,7 +145,7 @@ public:
         if (isRunning()) {
             running_ = false;
             DBGOUT("closing listen socket...");
-            closesocket(listenSocket_);
+            _close(listenSocket_);
             return 0;
         }
         return 1;
@@ -182,13 +174,14 @@ public:
 private:
     PortNumber portNumber_;
 
-    SOCKET listenSocket_;
-    SOCKET clientSocket_;
+    Socket listenSocket_;
+    Socket clientSocket_;
 
     SocketCallback recvCb_;
-    
-    std::atomic_bool running_;
-    std::atomic_bool connected_;
+
+    std::atomic<bool> running_;
+    std::atomic<bool> connected_;
+
 };
 
 }

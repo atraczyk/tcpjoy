@@ -151,7 +151,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\common\Client.hpp" />
-    <ClInclude Include="..\common\Log.hpp" />
+    <ClInclude Include="..\common\Log.h" />
     <ClInclude Include="..\common\Networker.hpp" />
     <ClInclude Include="..\common\Server.hpp" />
     <ClInclude Include="..\common\Timer.hpp" />

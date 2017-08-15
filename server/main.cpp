@@ -15,7 +15,7 @@
 *  along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "Log.hpp"
+#include "Log.h"
 #include "Networker.hpp"
 
 #include "cstdlib"
@@ -23,14 +23,14 @@
 using namespace Network;
 
 void
-recvCb(SOCKET& ClientSocket, const char* recvbuf, int recvResult)
+recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
 {
     DBGOUT("rxcb - bytes received: %d", recvResult);
     DBGOUT("rxcb - bytes : %s", recvbuf);
 
     auto sendResult = send(ClientSocket, recvbuf, recvResult, 0);
     if (sendResult == SOCKET_ERROR) {
-        DBGOUT("rxcb - send failed with error: %d", WSAGetLastError());
+        DBGOUT("rxcb - send failed with error: %d", _socketError());
     }
     DBGOUT("rxcb - bytes sent: %d", sendResult);
 }
@@ -51,7 +51,8 @@ run()
     return res;
 }
 
-int __cdecl main(void)
+int
+main(void)
 {
     int ret = run();
     

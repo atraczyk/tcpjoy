@@ -80,8 +80,9 @@ private:
     }
 
     std::atomic_int runCount_;
-    std::atomic_bool isRunning_;
+    std::atomic<bool> isRunning_;
     std::chrono::duration<double> delay_;
     std::function<void()> func_;
     std::function<bool()> pred_;
+
 };

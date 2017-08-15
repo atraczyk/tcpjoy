@@ -21,27 +21,10 @@
 #include <string>
 #include <future>
 
-#ifdef _WIN32
-#undef UNICODE
-
-#define WIN32_LEAN_AND_MEAN
-
-#include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <stdlib.h>
-#include <stdio.h>
-
-#pragma comment (lib, "Ws2_32.lib")
-#endif
-
-#include "Log.hpp"
+#include "Log.h"
 #include "Server.hpp"
 #include "Client.hpp"
 #include "Timer.hpp"
-
-#define DEFAULT_BUFLEN 8192
-#define DEFAULT_PORT 27015
 
 namespace Network
 {
@@ -60,24 +43,29 @@ public:
 
     int
     init() {
+#ifdef _WIN32
+        WSADATA wsaData;
         DBGOUT("starting Winsock...");
-        int res = WSAStartup(MAKEWORD(2, 2), &wsaData_);
+        int res = WSAStartup(MAKEWORD(2, 2), &wsaData);
         if (res != 0) {
             DBGOUT("WSAStartup failed with error: %d", res);
             return res;
         }
+#endif
         return 0;
     };
 
     void
     cleanup() {
         closeServer();
+#ifdef _WIN32
         DBGOUT("cleaning up Winsock...");
         WSACleanup();
+#endif
     }
 
     // server
-    int 
+    int
     startServer(PortNumber port) {
         return server_.start(port);
     };
@@ -98,7 +86,7 @@ public:
     std::future<void>
     serverRecvHandlerAsync() {
         return std::async([this]() {
-            SOCKET ClientSocket = server_.acceptClient();
+            Socket ClientSocket = server_.acceptClient();
             DBGOUT("rx - recvHandler - start...");
             int     recvResult = 1;
             char    recvbuf[DEFAULT_BUFLEN];
@@ -115,7 +103,7 @@ public:
                     break;
                 }
                 else {
-                    DBGOUT("rx - recv failed with error: %d", WSAGetLastError());
+                    DBGOUT("rx - recv failed with error: %d", _socketError());
                     break;
                 }
             };
@@ -126,7 +114,6 @@ public:
     void
     closeServer() {
         if (server_.isRunning()) {
-            clientRecvTask_._Abandon();
             DBGOUT("closing server...");
             server_.stopListening();
         }
@@ -139,8 +126,7 @@ public:
 
     // client
     int
-    startClient(const std::string& host,
-                PortNumber port) {
+    startClient(const std::string& host, PortNumber port) {
         int res = client_.connectToHost(host, port);
         if (res == 0)
             clientRecvTask_ = clientRecvHandlerAsync();
@@ -151,7 +137,7 @@ public:
     clientRecvHandlerAsync() {
         return std::async([this]() {
             DBGOUT("rx - recvHandler - start...");
-            SOCKET Socket = client_.getSocket();
+            Socket Socket = client_.getSocket();
             int     recvResult = 1;
             char    recvbuf[DEFAULT_BUFLEN];
             int     recvbuflen = DEFAULT_BUFLEN;
@@ -167,7 +153,7 @@ public:
                     break;
                 }
                 else {
-                    DBGOUT("rx - recv failed with error: %d", WSAGetLastError());
+                    DBGOUT("rx - recv failed with error: %d", _socketError());
                     break;
                 }
             };
@@ -181,27 +167,24 @@ public:
     };
 
     int
-    startStreaming( SocketCallback&& recvcb,
-                    SocketHandler&& writer) {
+    startStreaming( SocketCallback&& recvcb, SocketHandler&& writer) {
         client_.setRecvCb(recvcb);
         auto txHandler = client_.setSendHandler(writer);
         txHandler.get();
         auto res = client_.disconnect();
-        clientRecvTask_._Abandon();
         if (res == SOCKET_ERROR) {
-            DBGOUT("startStreaming - disconnect failed with error: %d", WSAGetLastError());
+            DBGOUT("startStreaming - disconnect failed with error: %d", _socketError());
             return 1;
         }
         return 0;
     };
 
 private:
-    WSADATA wsaData_;
-
     std::future<void> clientRecvTask_;
 
     Server server_;
     Client client_;
+
 };
 
 }

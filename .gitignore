@@ -295,3 +295,8 @@ __pycache__/
 *.xsd.cs
 
 sdl/
+test/
+*.o
+*.gch
+client
+server

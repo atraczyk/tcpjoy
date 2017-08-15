@@ -15,16 +15,26 @@
 *  along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "Log.hpp"
+#include "Log.h"
 #include "Networker.hpp"
 #include "Timer.hpp"
 
 #include "SDL.h"
 
 #include <cstdlib>
+#ifndef _WIN32
+#include <sys/io.h>
+#else
 #include <io.h>
+#endif
 #include <fcntl.h>
 #include <ios>
+
+#ifndef _WIN32
+#define sprintf_ sprintf
+#else
+#define sprintf_ sprintf_s
+#endif
 
 SDL_GameController *controller = NULL;
 const int JOYSTICK_DEAD_ZONE = 4000;
@@ -89,31 +99,31 @@ getJoyState()
 }
 
 void
-recvCb(SOCKET& ClientSocket, const char* recvbuf, int recvResult)
+recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
 {
     DBGOUT("rxcb - bytes received: %d", recvResult);
     DBGOUT("rxcb - bytes : %s", recvbuf);
 }
 
 int
-sendHandler(SOCKET Socket, std::atomic<bool>& running)
+sendHandler(Socket Socket, std::atomic<bool>& running)
 {
     DBGOUT("txh - sendHandler - start...");
-    
+
     int sendResult = 1;
-    
+
     char sendbuf[DEFAULT_BUFLEN];
-    
+
     timer writer([Socket, &running, &sendResult, &sendbuf]() {
         getJoyState();
-        sprintf_s(sendbuf,
+        sprintf_(sendbuf,
             "'{'j0':{'lx':'%d','ly':'%d','b0':'%d','b1':'%d'}}'",
             lx, ly, ba, bb);
         std::string data(sendbuf);
         if(!data.empty())
             sendResult = writeToSocket(Socket, data);
         if (sendResult == SOCKET_ERROR) {
-            DBGOUT("txh - send failed with error: %d", WSAGetLastError());
+            DBGOUT("txh - send failed with error: %d", _socketError());
             running = false;
         }
         else if (sendResult == 0) {
@@ -156,8 +166,8 @@ run()
 }
 
 #undef main
-int __cdecl
- main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
     initializeSDL();
     getController();

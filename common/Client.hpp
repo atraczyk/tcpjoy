@@ -21,7 +21,19 @@
 #include <string>
 #include <future>
 
-#ifdef _WIN32
+#ifndef _WIN32
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <string.h>
+#include <error.h>
+#include <netdb.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+#else
 #undef UNICODE
 
 #define WIN32_LEAN_AND_MEAN
@@ -35,50 +47,104 @@
 #pragma comment (lib, "Ws2_32.lib")
 #endif
 
-#include "Log.hpp"
+#include "Log.h"
+
+#ifndef _WIN32
+using Socket = int;
+using Host = hostent*;
+#define INVALID_SOCKET          (~0)
+#define SOCKET_ERROR            (-1)
+#else
+using Socket = SOCKET;
+using Host = std::string;
+#endif
+
+using PortNumber = uint16_t;
+
+#define DEFAULT_BUFLEN 8192
+#define DEFAULT_PORT 27015
 
 namespace Network
 {
 
-using PortNumber = uint16_t;
-using SocketHandler = std::function<void(SOCKET,std::atomic<bool>&)>;
-using SocketCallback = std::function<void(SOCKET&, const char*, int)>;
+using SocketHandler = std::function<void(Socket, std::atomic<bool>&)>;
+using SocketCallback = std::function<void(Socket&, const char*, int)>;
+
+void
+_close(Socket socket)
+{
+#ifndef _WIN32
+    close(socket);
+#else
+    closesocket(socket);
+#endif
+}
 
 int
-writeToSocket(SOCKET socket, const std::string& data) {
+_socketError()
+{
+#ifndef _WIN32
+    return 1;
+#else
+    return WSAGetLastError();
+#endif
+}
+
+int
+writeToSocket(Socket socket, const std::string& data) {
     const char *sendbuf = data.c_str();
     auto res = send(socket, sendbuf, (int)strlen(sendbuf), 0);
     if (res == SOCKET_ERROR) {
-        DBGOUT("send failed with error: %d", WSAGetLastError());
+        DBGOUT("send failed with error: %d", _socketError());
         return res;
     }
     return res;
 };
 
-//int
-//writeToSocket(SOCKET socket, const char* data) {
-//    auto res = send(socket, data, (int)strlen(data), 0);
-//    if (res == SOCKET_ERROR) {
-//        DBGOUT("send failed with error: %d", WSAGetLastError());
-//        return res;
-//    }
-//    return res;
-//};
-
 class Client {
 public:
-    Client(): connected_(false) { };
-    Client(PortNumber port) : connected_(false) { };
+    Client()
+        : connectSocket_(INVALID_SOCKET)
+        , connected_(false)
+        , receiving_(false)
+        , transmitting_(false) { };
     // todo: disable copy semantics and enable move semantics
     ~Client() {};
 
     int
-    connectToHost(std::string host, PortNumber port = 0) {
+    connectToHost(std::string host, PortNumber port = 0)
+    {
         DBGOUT("connecting to %s...", host);
-
         if (port)
             portNumber_ = port;
 
+#ifndef _WIN32
+        if ((host_ = gethostbyname(host.c_str())) == NULL) {
+            perror("gethostbyname:");
+            return 1;
+        }
+
+        if ((connectSocket_ = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+            perror("socket:");
+            DBGOUT("unable to create socket");
+            return 1;
+        }
+
+        sockaddr_in serv_addr;
+
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(DEFAULT_PORT);
+        serv_addr.sin_addr = *((struct in_addr *)host_->h_addr);
+        bzero(&(serv_addr.sin_zero), 8);
+
+        if (connect(connectSocket_,
+            (struct sockaddr *)&serv_addr,
+            sizeof(struct sockaddr)) == -1) {
+            DBGOUT("unable to connect to server");
+            return 1;
+        }
+#else
+        host_ = host;
         unsigned res = 0;
 
         addrinfo *addressResult = nullptr;
@@ -90,32 +156,31 @@ public:
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_protocol = IPPROTO_TCP;
 
-        res = getaddrinfo(  host.c_str(),
-                            std::to_string(portNumber_).c_str(),
-                            &hints,
-                            &addressResult);
+        res = getaddrinfo(host_.c_str(),
+            std::to_string(portNumber_).c_str(),
+            &hints,
+            &addressResult);
         if (res != 0) {
             DBGOUT("getaddrinfo failed with error: %d", res);
             return 1;
         }
 
-        for (   addressAttempt = addressResult;
-                addressAttempt != NULL;
-                addressAttempt = addressAttempt->ai_next) {
+        for (addressAttempt = addressResult;
+            addressAttempt != NULL;
+            addressAttempt = addressAttempt->ai_next) {
             connectSocket_ = socket(addressAttempt->ai_family,
-                                    addressAttempt->ai_socktype,
-                                    addressAttempt->ai_protocol);
+                addressAttempt->ai_socktype,
+                addressAttempt->ai_protocol);
             if (connectSocket_ == INVALID_SOCKET) {
                 freeaddrinfo(addressResult);
-                DBGOUT("socket failed with error: %ld", WSAGetLastError());
+                DBGOUT("socket failed with error: %ld", _socketError());
                 return 1;
             }
 
-            res = connect(  connectSocket_,
-                            addressAttempt->ai_addr,
-                            (int)addressAttempt->ai_addrlen);
+            res = connect(connectSocket_, addressAttempt->ai_addr,
+                (int)addressAttempt->ai_addrlen);
             if (res == SOCKET_ERROR) {
-                closesocket(connectSocket_);
+                _close(connected_);
                 connectSocket_ = INVALID_SOCKET;
                 continue;
             }
@@ -129,6 +194,7 @@ public:
             return 1;
         }
 
+#endif /* _WIN32 */
         connected_ = true;
         DBGOUT("connected to %s...", host);
         return 0;
@@ -137,21 +203,14 @@ public:
     int
     disconnect() {
         DBGOUT("closing connected socket...");
-        auto res = shutdown(connectSocket_, SD_SEND);
-        if (res == SOCKET_ERROR) {
-            DBGOUT("shutdown failed with error: %ld", WSAGetLastError());
-            closeConnectedSocket();
-            return 1;
-        }
-        closeConnectedSocket();
-        return 0;
+        return closeConnectedSocket();
     };
 
     int
     write(const std::string& data) {
         auto res = writeToSocket(connectSocket_, data);
         if (res == SOCKET_ERROR) {
-            DBGOUT("write failed with error: %d", WSAGetLastError());
+            DBGOUT("write failed with error: %d", _socketError());
             return res;
         }
         return res;
@@ -162,12 +221,15 @@ public:
         if (isConnected()) {
             DBGOUT("shutting down connected socket...");
             connected_ = false;
+#ifdef _WIN32
             int res = shutdown(connectSocket_, SD_SEND);
             if (res == SOCKET_ERROR) {
-                DBGOUT("shutdown failed with error: %ld", WSAGetLastError());
-                closesocket(connectSocket_);
+                DBGOUT("shutdown failed with error: %ld", _socketError());
+                _close(connectSocket_);
                 return 1;
             }
+#endif
+            _close(connectSocket_);
             return 0;
         }
         return 1;
@@ -184,7 +246,7 @@ public:
         return sendFuture_;
     };
 
-    SOCKET
+    Socket
     getSocket() {
         return connectSocket_;
     };
@@ -195,7 +257,7 @@ public:
     };
 
     SocketCallback&
-        getRecvCb() {
+    getRecvCb() {
         return recvCb_;
     };
 
@@ -205,15 +267,15 @@ public:
     };
 
 private:
-    std::string host_;
+    Host host_;
     PortNumber portNumber_;
-    SOCKET connectSocket_;
-    std::atomic_bool connected_;
+    Socket connectSocket_;
+    std::atomic<bool> connected_;
 
-    std::atomic_bool receiving_;
+    std::atomic<bool> receiving_;
     SocketCallback recvCb_;
 
-    std::atomic_bool transmitting_;
+    std::atomic<bool> transmitting_;
     SocketHandler sendHandler_;
     std::shared_future<void> sendFuture_;
 
