@@ -158,7 +158,8 @@ run()
 
     do {
         tries = 0;
-        TRY_OR_DIE(nw.startClient("localhost", DEFAULT_PORT));
+        nw.startClient("192.168.2.98", DEFAULT_PORT);
+        //TRY_OR_DIE(nw.startClient("localhost", DEFAULT_PORT));
         TRY_OR_DIE(nw.startStreaming(&recvCb, &sendHandler));
     } while (true);
 

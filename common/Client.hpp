@@ -112,15 +112,16 @@ public:
     ~Client() {};
 
     int
-    connectToHost(std::string host, PortNumber port = 0)
+    connectToHost(const std::string& host, PortNumber port = 0)
     {
-        DBGOUT("connecting to %s...", host);
+        DBGOUT("connecting to %s...", host.c_str());
         if (port)
             portNumber_ = port;
 
 #ifndef _WIN32
         if ((host_ = gethostbyname(host.c_str())) == NULL) {
             perror("gethostbyname:");
+            DBGOUT("unable to gethostbyname: %s", host.c_str());
             return 1;
         }
 

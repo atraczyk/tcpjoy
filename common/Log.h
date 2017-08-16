@@ -45,7 +45,7 @@ printLog(std::ostream& s, char const *m, std::array<char, 8192>& buf, int len) {
     s.write(buf.data(), std::min((size_t)len, buf.size()));
     if ((size_t)len >= buf.size())
         s << "[[TRUNCATED]]";
-        s << std::endl;
+    s << std::endl;
 }
 
 void
@@ -64,8 +64,8 @@ consoleLog(char const *m, ...) {
 
 #ifndef DBGOUT
 #ifndef _WIN32
-//#define DBGOUT(m, ...)
-#define DBGOUT(format, …) fprintf (stdout, format, __VA_ARGS__)
+#define DBGOUT(m, ...) consoleLog(m, ## __VA_ARGS__)
+//#define DBGOUT(format, ...) fprintf (stdout, format, ## __VA_ARGS__)
 #else
 #define DBGOUT(m, ...) consoleLog(m, __VA_ARGS__)
 #endif

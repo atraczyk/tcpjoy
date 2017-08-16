@@ -299,4 +299,6 @@ test/
 *.o
 *.gch
 client
+!client/
 server
+!server/
