@@ -65,7 +65,6 @@ consoleLog(char const *m, ...) {
 #ifndef DBGOUT
 #ifndef _WIN32
 #define DBGOUT(m, ...) consoleLog(m, ## __VA_ARGS__)
-//#define DBGOUT(format, ...) fprintf (stdout, format, ## __VA_ARGS__)
 #else
 #define DBGOUT(m, ...) consoleLog(m, __VA_ARGS__)
 #endif

@@ -25,7 +25,7 @@
 #define ZeroMemory(Destination,Length) memset((Destination),0,(Length))
 #endif
 
-#include "Log.h"
+#include "Log.hpp"
 #include "Client.hpp"
 
 using namespace Network;

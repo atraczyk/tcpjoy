@@ -47,7 +47,7 @@
 #pragma comment (lib, "Ws2_32.lib")
 #endif
 
-#include "Log.h"
+#include "Log.hpp"
 
 #ifndef _WIN32
 using Socket = int;

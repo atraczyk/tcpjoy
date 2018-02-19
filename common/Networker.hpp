@@ -21,7 +21,7 @@
 #include <string>
 #include <future>
 
-#include "Log.h"
+#include "Log.hpp"
 #include "Server.hpp"
 #include "Client.hpp"
 #include "Timer.hpp"

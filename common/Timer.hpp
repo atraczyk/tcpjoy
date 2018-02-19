@@ -20,6 +20,7 @@
 #include <chrono>
 #include <functional>
 #include <thread>
+#include <atomic>
 
 class timer
 {

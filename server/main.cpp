@@ -15,10 +15,10 @@
 *  along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "Log.h"
+#include "Log.hpp"
 #include "Networker.hpp"
 
-#include "cstdlib"
+#include <cstdlib>
 
 using namespace Network;
 
@@ -35,11 +35,59 @@ recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
     DBGOUT("rxcb - bytes sent: %d", sendResult);
 }
 
+void
+SimulateKeyDown(INPUT& input, const WORD& keycode)
+{
+    input.ki.wVk = keycode;
+    input.ki.dwFlags = 0;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void
+SimulateKeyUp(INPUT& input, const WORD& keycode)
+{
+    input.ki.wVk = keycode;
+    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void
+SimulateKeyStroke(INPUT& input, const WORD& keycode)
+{
+    SimulateKeyDown(input, keycode);
+    SimulateKeyUp(input, keycode);
+}
+
 int
 run()
 {
     int res;
     Networker nw;
+
+    std::thread([]() {
+        auto quit = false;
+        while (!quit) {
+            INPUT ip;
+            Sleep(1000);
+            // Set up a generic keyboard event.
+            ip.type = INPUT_KEYBOARD;
+            ip.ki.wScan = 0; // hardware scan code for key
+            ip.ki.time = 0;
+            ip.ki.dwExtraInfo = 0;
+
+            SimulateKeyStroke(ip, VK_LWIN);
+            Sleep(100);
+            SimulateKeyStroke(ip, 0x4E);
+            Sleep(100);
+            SimulateKeyStroke(ip, 0x4F);
+            Sleep(100);
+            SimulateKeyStroke(ip, 0x54);
+            Sleep(100);
+            SimulateKeyStroke(ip, VK_RETURN);
+
+            quit = true;
+        }
+    }).detach();
 
     if (res = nw.startServer(DEFAULT_PORT) != 0)
         return res;

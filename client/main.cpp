@@ -15,7 +15,7 @@
 *  along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "Log.h"
+#include "Log.hpp"
 #include "Networker.hpp"
 #include "Timer.hpp"
 
