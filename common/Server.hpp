@@ -54,7 +54,27 @@ public:
             DBGOUT("accept failed with error: %ld", _socketError());
             closeclientSocket();
         }
-        DBGOUT("client connected");
+
+        socklen_t len;
+        struct sockaddr_storage addr;
+        char ipstr[INET6_ADDRSTRLEN];
+        int clientPort;
+
+        len = sizeof addr;
+        getpeername(clientSocket_, (struct sockaddr*)&addr, &len);
+
+        if (addr.ss_family == AF_INET) {
+            struct sockaddr_in *s = (struct sockaddr_in *)&addr;
+            clientPort = ntohs(s->sin_port);
+            inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof ipstr);
+        }
+        else {
+            struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
+            clientPort = ntohs(s->sin6_port);
+            inet_ntop(AF_INET6, &s->sin6_addr, ipstr, sizeof ipstr);
+        }
+        DBGOUT("client %s:%d connected", ipstr, clientPort);
+
         connected_ = true;
         return clientSocket_;
     };

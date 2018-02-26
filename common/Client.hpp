@@ -62,7 +62,7 @@ using Host = std::string;
 using PortNumber = uint16_t;
 
 #define DEFAULT_BUFLEN 8192
-#define DEFAULT_PORT 27015
+#define DEFAULT_PORT 8888
 
 namespace Network
 {

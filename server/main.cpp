@@ -15,6 +15,8 @@
 *  along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
+#define DEBUG
+
 #include "Log.hpp"
 #include "Networker.hpp"
 
@@ -22,17 +24,65 @@
 
 using namespace Network;
 
-void
-recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
-{
-    DBGOUT("rxcb - bytes received: %d", recvResult);
-    DBGOUT("rxcb - bytes : %s", recvbuf);
+INPUT ip;
 
-    auto sendResult = send(ClientSocket, recvbuf, recvResult, 0);
-    if (sendResult == SOCKET_ERROR) {
-        DBGOUT("rxcb - send failed with error: %d", _socketError());
-    }
-    DBGOUT("rxcb - bytes sent: %d", sendResult);
+void
+MouseSetup(INPUT *buffer)
+{
+    ZeroMemory(buffer, sizeof(buffer));
+    buffer->type = INPUT_MOUSE;
+    buffer->mi.dx = 0;
+    buffer->mi.dy = 0;
+    buffer->mi.mouseData = 0;
+    buffer->mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_VIRTUALDESK;
+    buffer->mi.time = 0;
+    buffer->mi.dwExtraInfo = 0;
+}
+
+void
+MouseMoveAbsolute(INPUT& input, int x, int y)
+{
+    input.mi.dx = x * (65536 / GetSystemMetrics(SM_CXSCREEN));
+    input.mi.dy = y * (65536 / GetSystemMetrics(SM_CYSCREEN));
+    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void
+MouseMoveRelative(INPUT& input, int dx, int dy)
+{
+    input.mi.dx = dx;
+    input.mi.dy = dy;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_VIRTUALDESK;
+
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void
+MouseLeftDown(INPUT& input)
+{
+    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void
+MouseLeftUp(INPUT& input)
+{
+    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+void
+MouseLeftClick(INPUT& input)
+{
+    input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    SendInput(1, &input, sizeof(INPUT));
+
+    Sleep(10);
+
+    input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(1, &input, sizeof(INPUT));
 }
 
 void
@@ -58,36 +108,60 @@ SimulateKeyStroke(INPUT& input, const WORD& keycode)
     SimulateKeyUp(input, keycode);
 }
 
+void
+recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
+{
+    char *token = std::strtok(strdup(recvbuf), ":\0");
+    if (strcmp(token, "k") == 0) {
+        ip.type = INPUT_KEYBOARD;
+        ip.ki.wScan = 0;
+        ip.ki.time = 0;
+        ip.ki.dwExtraInfo = 0;
+        DBGOUT("TEXT");
+        token = std::strtok(NULL, "\0");
+        int len = strlen(token);
+        for (int i = 0; i < len; i++) {
+            auto wvk = VkKeyScanEx((char)token[i], GetKeyboardLayout(0));
+            DBGOUT("Value: %c, %d", (char)token[i], wvk);
+            SimulateKeyStroke(ip, wvk);
+        }
+    }
+    else {
+        MouseSetup(&ip);
+        if (strcmp(token, "lu") == 0) {
+            DBGOUT("MOUSEUP");
+            //MouseLeftUp(ip);
+        }
+        else if (strcmp(token, "ld") == 0) {
+            DBGOUT("MOUSEDOWN");
+            //MouseLeftDown(ip);
+            MouseLeftClick(ip);
+        }
+        else if (strcmp(token, "m") == 0) {
+            int dx, dy, c = 0;
+            token = std::strtok(NULL, ",\0");
+            while (token != NULL && c < 2) {
+                if (c == 0) {
+                    dx = atoi(token);
+                }
+                else if (c == 1) {
+                    dy = atoi(token);
+                }
+                c++;
+                token = std::strtok(NULL, ",\0");
+            }
+            DBGOUT("MOUSEMOVE: (%d, %d)", dx, dy);
+
+            MouseMoveRelative(ip, dx, dy);
+        }
+    }
+}
+
 int
 run()
 {
     int res;
     Networker nw;
-
-    std::thread([]() {
-        auto quit = false;
-        while (!quit) {
-            INPUT ip;
-            Sleep(1000);
-            // Set up a generic keyboard event.
-            ip.type = INPUT_KEYBOARD;
-            ip.ki.wScan = 0; // hardware scan code for key
-            ip.ki.time = 0;
-            ip.ki.dwExtraInfo = 0;
-
-            SimulateKeyStroke(ip, VK_LWIN);
-            Sleep(100);
-            SimulateKeyStroke(ip, 0x4E);
-            Sleep(100);
-            SimulateKeyStroke(ip, 0x4F);
-            Sleep(100);
-            SimulateKeyStroke(ip, 0x54);
-            Sleep(100);
-            SimulateKeyStroke(ip, VK_RETURN);
-
-            quit = true;
-        }
-    }).detach();
 
     if (res = nw.startServer(DEFAULT_PORT) != 0)
         return res;

@@ -97,12 +97,10 @@ public:
                 recvResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
                 if (recvResult > 0) {
                     server_.getRecvCb()(ClientSocket, recvbuf, recvResult);
-                }
-                else if (recvResult == 0) {
+                } else if (recvResult == 0) {
                     DBGOUT("rx - connection closed by client...");
                     break;
-                }
-                else {
+                } else {
                     DBGOUT("rx - recv failed with error: %d", _socketError());
                     break;
                 }
@@ -147,12 +145,10 @@ public:
                 recvResult = recv(Socket, recvbuf, recvbuflen, 0);
                 if (recvResult > 0) {
                     client_.getRecvCb()(Socket, recvbuf, recvResult);
-                }
-                else if (recvResult == 0) {
+                } else if (recvResult == 0) {
                     DBGOUT("rx - connection closed by client...");
                     break;
-                }
-                else {
+                } else {
                     DBGOUT("rx - recv failed with error: %d", _socketError());
                     break;
                 }

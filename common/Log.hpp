@@ -62,10 +62,14 @@ consoleLog(char const *m, ...) {
     printLog(std::cout, m, buffer, ret);
 }
 
+#ifdef DEBUG
 #ifndef DBGOUT
 #ifndef _WIN32
 #define DBGOUT(m, ...) consoleLog(m, ## __VA_ARGS__)
 #else
 #define DBGOUT(m, ...) consoleLog(m, __VA_ARGS__)
 #endif
+#endif
+#else
+#define DBGOUT(m, ...)
 #endif
