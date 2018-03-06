@@ -20,6 +20,7 @@
 #include "Log.hpp"
 #include "Networker.hpp"
 
+#include <cmath>
 #include <cstdlib>
 
 using namespace Network;
@@ -173,11 +174,38 @@ run()
     return res;
 }
 
+#include <conio.h>
+#define PI 3.14159
+
 int
 main(void)
 {
-    int ret = run();
-    
+    //int ret = run();
+
+    int ret = 0;
+    auto running = true;
+    MouseSetup(&ip);
+    auto mousemove = std::thread([&running]() {
+        auto a = 0.0f;
+        auto amplitude = 2.0f;
+        while (running) {
+            auto xval = ::cos(a) * amplitude;
+            auto yval = ::sin(a) * amplitude;
+            a = a > 2 * PI ? 0 : a + 0.01;
+            DBGOUT("mousemove a: %0.2f, xv: %0.2f - yv: %0.2f", a, xval, yval);
+            MouseMoveRelative(ip, xval, yval);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        DBGOUT("done");
+    });
+
+    auto input = std::thread([&running]() {
+        getch();
+        running = false;
+    });
+
+    mousemove.join();
+    input.join();
     system("pause");
 
     return ret;
