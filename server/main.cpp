@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <chrono>
 
 using namespace Network;
 
@@ -109,6 +110,10 @@ SimulateKeyStroke(INPUT& input, const WORD& keycode)
     SimulateKeyUp(input, keycode);
 }
 
+auto start = std::chrono::steady_clock::now();
+std::mutex mouse_mutex;
+float dx = 0, dy = 0;
+
 void
 recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
 {
@@ -128,6 +133,7 @@ recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
         }
     }
     else {
+        std::lock_guard<std::mutex> lck(mouse_mutex);
         MouseSetup(&ip);
         if (strcmp(token, "lu") == 0) {
             DBGOUT("MOUSEUP");
@@ -139,7 +145,7 @@ recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
             MouseLeftClick(ip);
         }
         else if (strcmp(token, "m") == 0) {
-            int dx, dy, c = 0;
+            int c = 0;
             token = std::strtok(NULL, ",\0");
             while (token != NULL && c < 2) {
                 if (c == 0) {
@@ -153,59 +159,53 @@ recvCb(Socket& ClientSocket, const char* recvbuf, int recvResult)
             }
             DBGOUT("MOUSEMOVE: (%d, %d)", dx, dy);
 
-            MouseMoveRelative(ip, dx, dy);
+            MouseMoveRelative(ip, static_cast<int>(dx), static_cast<int>(dy));
         }
     }
 }
 
-int
-run()
-{
-    int res;
-    Networker nw;
-
-    if (res = nw.startServer(DEFAULT_PORT) != 0)
-        return res;
-
-    do {
-        res = nw.runServer(&recvCb) != 0;
-    } while (res == 0);
-
-    return res;
-}
-
 #include <conio.h>
-#define PI 3.14159
+#define PI 3.14159f
+#define EPSILON 0.5f
+#define DECEL 0.8f
 
 int
 main(void)
 {
-    //int ret = run();
-
-    int ret = 0;
+    Networker nw;
     auto running = true;
-    MouseSetup(&ip);
-    auto mousemove = std::thread([&running]() {
-        auto a = 0.0f;
-        auto amplitude = 2.0f;
+    int ret = 0;
+
+    auto network_thread = std::thread([&nw, &ret, &running]() {
+        if (ret = nw.startServer(DEFAULT_PORT) != 0) {
+            return;
+        }
+        do {
+            ret = nw.runServer(&recvCb) != 0;
+        } while (ret == 0 && running);
+    });
+
+    auto mouse_thread = std::thread([&running]() {
         while (running) {
-            auto xval = ::cos(a) * amplitude;
-            auto yval = ::sin(a) * amplitude;
-            a = a > 2 * PI ? 0 : a + 0.01;
-            DBGOUT("mousemove a: %0.2f, xv: %0.2f - yv: %0.2f", a, xval, yval);
-            MouseMoveRelative(ip, xval, yval);
+            dx = fabs(dx) < EPSILON ? 0.0f : dx * DECEL;
+            dy = fabs(dy) < EPSILON ? 0.0f : dy * DECEL;
+            //DBGOUT("mousemove   xv: %0.2f - yv: %0.2f", dx, dy);
+            MouseMoveRelative(ip, static_cast<int>(dx), static_cast<int>(dy));
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         DBGOUT("done");
     });
 
-    auto input = std::thread([&running]() {
+    auto input_thread = std::thread([&nw, &running]() {
         getch();
+        nw.closeServer();
         running = false;
     });
 
-    mousemove.join();
-    input.join();
+    network_thread.join();
+    mouse_thread.join();
+    input_thread.join();
+
     system("pause");
 
     return ret;
